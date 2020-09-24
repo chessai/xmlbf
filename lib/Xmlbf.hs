@@ -32,7 +32,7 @@ module Xmlbf {--}
  , pChildren
  , pText
  , pEndOfInput
- , pMany
+ , pElementMany
 
     -- * Rendering
  , encode
@@ -486,19 +486,86 @@ pChildren = Parser (\case
   SReg t as cs -> Right (SReg t as mempty, cs))
 {-# INLINABLE pChildren #-}
 
-pMany
-  :: Parser a
+{-
+pElement
+  :: T.Text    -- ^ Element name as strict 'T.Text'.
+  -> Parser a  -- ^ 'Parser' to run /inside/ the matched 'Element'.
+  -> Parser a
+pElement t0 p0 = Parser $ \case
+  SReg t1 as0 (Element' t as cs : cs0) | t == t0 ->
+    case unParser p0 (SReg t as cs) of
+      Right (_, a) -> Right (SReg t1 as0 cs0, a)
+      Left msg -> Left msg
+  STop (Element' t as cs : cs0) | t == t0 ->
+    case unParser p0 (SReg t as cs) of
+      Right (_, a) -> Right (STop cs0, a)
+      Left msg -> Left msg
+  -- skip leading whitespace
+  SReg t as (Text' x : cs) | TL.all Char.isSpace x ->
+    unParser (pElement t0 p0) (SReg t as cs)
+  STop (Text' x : cs) | TL.all Char.isSpace x ->
+    unParser (pElement t0 p0) (STop cs)
+  _ -> Left ("Missing element " <> show t0)
+{-# INLINABLE pElement #-}
+-}
+
+pElementMany
+  :: T.Text
+  -> Parser a
   -> Parser [a]
-pMany p = Parser (go [])
+pElementMany t0 p0 = Parser (go [])
   where
+    go xs = \case
+      SReg t1 as0 [] -> do
+        pure (SReg t1 as0 [], xs)
+      STop [] -> do
+        pure (STop [], xs)
+      SReg t1 as0 (Element' t as cs : cs0) | t == t0 -> do
+        (_, x) <- unParser p0 (SReg t as cs)
+        go (x : xs) (SReg t1 as0 cs0)
+      STop (Element' t as cs : cs0) | t == t0 -> do
+        (_, x) <- unParser p0 (SReg t as cs)
+        go (x : xs) (STop cs0)
+      SReg t as (Text' x : cs) | TL.all Char.isSpace x -> do
+        unParser (pElementMany t0 p0) (SReg t as cs)
+      STop (Text' x : cs) | TL.all Char.isSpace x -> do
+        unParser (pElementMany t0 p0) (STop cs)
+      _ -> do
+        Left ("Missing element " <> show t0)
+{-
     go as s = case s of
       STop [] -> do
         pure (s, as)
+      STop (Text' x : cs) | TL.all Char.isSpace x ->
+        (s1, a) <- unParser p (STop cs)
+        go (a : as) s1
+      STop (Element' t attributes cs : ns) ->
+        (s1, a) <- unParser p (SReg t attributes cs)
+        go (a : as) s1
       SReg _ _ [] -> do
         pure (s, as)
+      SReg
       _ -> do
         (s1, a) <- unParser p s
         go (a : as) s1
+-}
+
+{-
+  SReg t1 as0 (Element' t as cs : cs0) | t == t0 ->
+    case unParser p0 (SReg t as cs) of
+      Right (_, a) -> Right (SReg t1 as0 cs0, a)
+      Left msg -> Left msg
+  STop (Element' t as cs : cs0) | t == t0 ->
+    case unParser p0 (SReg t as cs) of
+      Right (_, a) -> Right (STop cs0, a)
+      Left msg -> Left msg
+  -- skip leading whitespace
+  SReg t as (Text' x : cs) | TL.all Char.isSpace x ->
+    unParser (pElement t0 p0) (SReg t as cs)
+  STop (Text' x : cs) | TL.all Char.isSpace x ->
+    unParser (pElement t0 p0) (STop cs)
+  _ -> Left ("Missing element " <> show t0)
+-}
 
 -- | Returns the contents of a 'Text' node.
 --
